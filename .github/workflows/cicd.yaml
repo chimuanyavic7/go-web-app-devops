@@ -49,15 +49,17 @@ jobs:
     outputs:
       IMAGE_TAG: ${{ steps.set_tag.outputs.IMAGE_TAG }}
     steps:
-      - name: Set image tag
+      - name: Determine Docker image tag
         id: set_tag
         run: |
-          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
-            echo "IMAGE_TAG=${GITHUB_REF_NAME}" >> $GITHUB_ENV
-            echo "IMAGE_TAG=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            TAG_NAME="${GITHUB_REF#refs/tags/}"
+            echo "IMAGE_TAG=${TAG_NAME}" >> $GITHUB_ENV
+            echo "IMAGE_TAG=${TAG_NAME}" >> $GITHUB_OUTPUT
           else
-            echo "IMAGE_TAG=dev-${GITHUB_RUN_ID}" >> $GITHUB_ENV
-            echo "IMAGE_TAG=dev-${GITHUB_RUN_ID}" >> $GITHUB_OUTPUT
+            DEV_TAG="dev-${GITHUB_RUN_ID}"
+            echo "IMAGE_TAG=${DEV_TAG}" >> $GITHUB_ENV
+            echo "IMAGE_TAG=${DEV_TAG}" >> $GITHUB_OUTPUT
           fi
 
   push:
