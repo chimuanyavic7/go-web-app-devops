@@ -52,11 +52,13 @@ jobs:
       - name: Determine Docker image tag
         id: set_tag
         run: |
+          # If this is a tag push (refs/tags/*), use the tag as IMAGE_TAG
           if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
             TAG_NAME="${GITHUB_REF#refs/tags/}"
             echo "IMAGE_TAG=${TAG_NAME}" >> $GITHUB_ENV
             echo "IMAGE_TAG=${TAG_NAME}" >> $GITHUB_OUTPUT
           else
+            # Otherwise, for branch pushes, use dev-<run_id>
             DEV_TAG="dev-${GITHUB_RUN_ID}"
             echo "IMAGE_TAG=${DEV_TAG}" >> $GITHUB_ENV
             echo "IMAGE_TAG=${DEV_TAG}" >> $GITHUB_OUTPUT
