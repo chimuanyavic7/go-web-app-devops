@@ -70,7 +70,7 @@ jobs:
           # Split into major, minor, patch
           IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
 
-          # Increment PATCH and ensure decimal
+          # Increment PATCH safely
           PATCH=$((10#$PATCH + 1))
 
           # Construct new version
@@ -124,6 +124,7 @@ jobs:
         run: |
           if [ ! -f helm/go-web-app-chart/values.yaml ]; then
             echo "tag: 1.0.0" > helm/go-web-app-chart/values.yaml
+          fi
 
       - name: Update tag in Helm chart
         run: |
