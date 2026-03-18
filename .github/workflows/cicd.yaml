@@ -4,119 +4,107 @@ on:
   push:
     branches:
       - main
+    tags:
+      - 'v*'
     paths-ignore:
       - 'helm/**'
       - 'k8s/**'
       - 'README.md'
 
 jobs:
-
   build:
     runs-on: ubuntu-latest
-
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-    - name: Set up Go 1.21
-      uses: actions/setup-go@v5
-      with:
-        go-version: 1.22
+      - name: Set up Go 1.21
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.21.13
 
-    - name: Download dependencies
-      run: go mod download    
+      - name: Download dependencies
+        run: go mod download    
 
-    - name: Build
-      run: go build -o go-web-app
+      - name: Build
+        run: go build -o go-web-app
 
-    - name: Test
-      run: go test ./...
+      - name: Test
+        run: go test ./...
 
   code-quality:
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-    - name: Run golangci-lint
-      uses: golangci/golangci-lint-action@v6
-      with:
-        version: v1.60.3
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.60.3
+
+  set-image-tag:
+    runs-on: ubuntu-latest
+    outputs:
+      IMAGE_TAG: ${{ steps.set_tag.outputs.IMAGE_TAG }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Determine automatic Docker image tag
+        id: set_tag
+        run: |
+          # Use Git tag if present, otherwise fallback to dev-run_id
+          if [[ -n "${GITHUB_REF_NAME}" ]]; then
+            IMAGE_TAG="${GITHUB_REF_NAME}"
+          else
+            IMAGE_TAG="dev-${GITHUB_RUN_ID}"
+          fi
+          echo "IMAGE_TAG=${IMAGE_TAG}" >> $GITHUB_ENV
+          echo "IMAGE_TAG=${IMAGE_TAG}" >> $GITHUB_OUTPUT
+          echo "Using Docker image tag: ${IMAGE_TAG}"
 
   push:
     runs-on: ubuntu-latest
-    needs: build
+    needs: [build, set-image-tag]
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      with:
-        token: ${{ secrets.GIT_TOKEN }}
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-    # Step to read and increment the version
-    - name: Increment version
-      id: version
-      run: |
-        # Read current version
-        CURRENT_VERSION=$(cat VERSION)
-        echo "Current version: $CURRENT_VERSION"
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-        # Split into major.minor.patch
-        IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-        # Increment patch
-        PATCH=$((PATCH + 1))
+      - name: Build and Push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/go-web-app:${{ env.IMAGE_TAG }}
 
-        # New version
-        NEW_VERSION="$MAJOR.$MINOR.$PATCH"
-        echo "New version: $NEW_VERSION"
-
-        # Save new version
-        echo $NEW_VERSION > VERSION
-        echo "NEW_VERSION=$NEW_VERSION" >> $GITHUB_ENV
-
-    # Commit the new VERSION file
-    - name: Commit new version
-      run: |
-        git config --global user.email "victoronwuka7@gmail.com"
-        git config --global user.name "Chimuanya vic"
-        git add VERSION
-        git commit -m "Bump version to ${{ env.NEW_VERSION }}"
-        git push
-
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
-
-    - name: Login to DockerHub
-      uses: docker/login-action@v3
-      with:
-        username: ${{ secrets.DOCKERHUB_USERNAME }}
-        password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-    - name: Build and Push Docker image
-      uses: docker/build-push-action@v6
-      with:
-        context: .
-        file: ./Dockerfile
-        push: true
-        tags: ${{ secrets.DOCKERHUB_USERNAME }}/go-web-app:${{ env.NEW_VERSION }}
-
-  update-helm:
+  update-helm-chart:
     runs-on: ubuntu-latest
     needs: push
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      with:
-        token: ${{ secrets.GIT_TOKEN }}
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GIT_TOKEN }}
 
-    - name: Update tag in Helm chart
-      run: |
-        sed -i "s/tag: .*/tag: \"${{ env.NEW_VERSION }}\"/" helm/go-web-app-chart/values.yaml
+      - name: Update image tag in Helm chart
+        run: |
+          sed -i 's/tag: .*/tag: "${IMAGE_TAG}"/' helm/go-web-app-chart/values.yaml
 
-    - name: Commit Helm chart
-      run: |
-        git config --global user.email "victoronwuka7@gmail.com"
-        git config --global user.name "Chimuanya vic"
-        git add helm/go-web-app-chart/values.yaml
-        git commit -m "Update Helm chart to ${{ env.NEW_VERSION }}"
-        git push
+      - name: Commit and push Helm chart update
+        run: |
+          git config --global user.email "your-email@example.com"
+          git config --global user.name "Your Name"
+          git add helm/go-web-app-chart/values.yaml
+          git commit -m "Update Helm chart with image tag ${IMAGE_TAG}" || echo "No changes to commit"
+          git push
