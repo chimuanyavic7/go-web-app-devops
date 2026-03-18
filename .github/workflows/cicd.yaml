@@ -16,8 +16,12 @@ concurrency:
 
 jobs:
 
-  build:
+  # ------------------------
+  # CI STAGE
+  # ------------------------
+  ci:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -27,6 +31,14 @@ jobs:
         with:
           go-version: 1.22
 
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+
       - name: Download dependencies
         run: go mod download
 
@@ -34,24 +46,23 @@ jobs:
         run: go build -o go-web-app
 
       - name: Test
-        run: go test ./...
+        run: go test -cover ./...
 
-  code-quality:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Run golangci-lint
+      - name: Lint
         uses: golangci/golangci-lint-action@v6
         with:
           version: v1.60.3
 
-  push:
+  # ------------------------
+  # VERSION + HELM (ATOMIC)
+  # ------------------------
+  release:
     runs-on: ubuntu-latest
-    needs: build
+    needs: ci
+
     outputs:
       new_version: ${{ steps.version.outputs.new_version }}
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -64,30 +75,62 @@ jobs:
           if [ ! -f VERSION ]; then
             echo "1.0.0" > VERSION
           fi
+
       - name: Increment version
         id: version
         run: |
-          # Read current version
           CURRENT_VERSION=$(cat VERSION)
           echo "Current version: $CURRENT_VERSION"
-          # Split into major, minor, patch
+
           IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
-          # Increment PATCH safely
           PATCH=$((10#$PATCH + 1))
-          # Construct new version
+
           NEW_VERSION="$MAJOR.$MINOR.$PATCH"
           echo "New version: $NEW_VERSION"
-          # Save to VERSION file
+
           echo "$NEW_VERSION" > VERSION
-          # Set output for other jobs
-          echo "::set-output name=new_version::$NEW_VERSION"
-      - name: Commit new VERSION
+          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Ensure Helm values.yaml exists
         run: |
-          git config --global user.email "victoronwuka7@gmail.com"
-          git config --global user.name "Chimuanya vic"
-          git add VERSION
-          git commit -m "Bump version to ${{ steps.version.outputs.new_version }}" || echo "No changes to commit"
+          if [ ! -f helm/go-web-app-chart/values.yaml ]; then
+            echo "tag: 1.0.0" > helm/go-web-app-chart/values.yaml
+          fi
+
+      - name: Update Helm chart
+        run: |
+          sed -i "s/tag: .*/tag: \"${{ steps.version.outputs.new_version }}\"/" helm/go-web-app-chart/values.yaml
+
+      - name: Commit VERSION + Helm (atomic)
+        run: |
+          git config --global user.email "your-email@example.com"
+          git config --global user.name "your-name"
+
+          git add VERSION helm/go-web-app-chart/values.yaml
+          git commit -m "Release version ${{ steps.version.outputs.new_version }}" || echo "No changes"
+
+          git pull --rebase origin main
           git push origin main
+
+      - name: Create Git tag
+        run: |
+          git tag v${{ steps.version.outputs.new_version }}
+          git push origin v${{ steps.version.outputs.new_version }}
+
+  # ------------------------
+  # DOCKER BUILD & PUSH
+  # ------------------------
+  docker:
+    runs-on: ubuntu-latest
+    needs: release
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set version
+        run: echo "VERSION=${{ needs.release.outputs.new_version }}" >> $GITHUB_ENV
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -98,39 +141,9 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Build and push Docker image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ./Dockerfile
-          push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/go-web-app:${{ steps.version.outputs.new_version }}
+        run: |
+          docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/go-web-app:$VERSION .
+          docker tag ${{ secrets.DOCKERHUB_USERNAME }}/go-web-app:$VERSION ${{ secrets.DOCKERHUB_USERNAME }}/go-web-app:latest
 
-  update-helm:
-    runs-on: ubuntu-latest
-    needs: push
-    env:
-      NEW_VERSION: ${{ needs.push.outputs.new_version }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GIT_TOKEN }}
-          fetch-depth: 0
-
-      - name: Ensure Helm values.yaml exists
-        run: |
-          if [ ! -f helm/go-web-app-chart/values.yaml ]; then
-            echo "tag: 1.0.0" > helm/go-web-app-chart/values.yaml
-          fi
-      - name: Update tag in Helm chart
-        run: |
-          echo "Updating Helm chart tag to $NEW_VERSION"
-          sed -i "s/tag: .*/tag: \"$NEW_VERSION\"/" helm/go-web-app-chart/values.yaml
-      - name: Commit Helm chart
-        run: |
-          git config --global user.email "victoronwuka7@gmail.com"
-          git config --global user.name "Chimuanya vic"
-          git add helm/go-web-app-chart/values.yaml
-          git commit -m "Update Helm chart to $NEW_VERSION" || echo "No changes to commit"
-          git pull --rebase origin main
-          git push origin main
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/go-web-app:$VERSION
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/go-web-app:latest
