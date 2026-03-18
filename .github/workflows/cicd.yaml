@@ -4,15 +4,12 @@ on:
   push:
     branches:
       - main
-    tags:
-      - 'v*'
     paths-ignore:
       - 'helm/**'
       - 'k8s/**'
       - 'README.md'
 
 jobs:
-
   build:
     runs-on: ubuntu-latest
     steps:
@@ -49,20 +46,20 @@ jobs:
     outputs:
       IMAGE_TAG: ${{ steps.set_tag.outputs.IMAGE_TAG }}
     steps:
-      - name: Determine Docker image tag
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Determine automatic version tag
         id: set_tag
         run: |
-          # If this is a tag push (refs/tags/*), use the tag as IMAGE_TAG
-          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
-            TAG_NAME="${GITHUB_REF#refs/tags/}"
-            echo "IMAGE_TAG=${TAG_NAME}" >> $GITHUB_ENV
-            echo "IMAGE_TAG=${TAG_NAME}" >> $GITHUB_OUTPUT
-          else
-            # Otherwise, for branch pushes, use dev-<run_id>
-            DEV_TAG="dev-${GITHUB_RUN_ID}"
-            echo "IMAGE_TAG=${DEV_TAG}" >> $GITHUB_ENV
-            echo "IMAGE_TAG=${DEV_TAG}" >> $GITHUB_OUTPUT
-          fi
+          # Get the number of commits on main as patch number
+          PATCH=$(git rev-list --count HEAD)
+          MAJOR=1
+          MINOR=0
+          IMAGE_TAG="v${MAJOR}.${MINOR}.${PATCH}"
+          echo "IMAGE_TAG=${IMAGE_TAG}" >> $GITHUB_ENV
+          echo "IMAGE_TAG=${IMAGE_TAG}" >> $GITHUB_OUTPUT
+          echo "Using Docker tag: ${IMAGE_TAG}"
 
   push:
     runs-on: ubuntu-latest
