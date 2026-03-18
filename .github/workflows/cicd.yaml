@@ -13,7 +13,6 @@ jobs:
 
   build:
     runs-on: ubuntu-latest
-
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
@@ -52,35 +51,30 @@ jobs:
       with:
         token: ${{ secrets.GIT_TOKEN }}
 
-    # Step to read and increment the version
+    - name: Ensure VERSION file exists
+      run: |
+        if [ ! -f VERSION ]; then
+          echo "1.0.0" > VERSION
+        fi
+
     - name: Increment version
       id: version
       run: |
-        # Read current version
         CURRENT_VERSION=$(cat VERSION)
         echo "Current version: $CURRENT_VERSION"
-
-        # Split into major.minor.patch
         IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
-
-        # Increment patch
         PATCH=$((PATCH + 1))
-
-        # New version
         NEW_VERSION="$MAJOR.$MINOR.$PATCH"
         echo "New version: $NEW_VERSION"
-
-        # Save new version
         echo $NEW_VERSION > VERSION
         echo "NEW_VERSION=$NEW_VERSION" >> $GITHUB_ENV
 
-    # Commit the new VERSION file
-    - name: Commit new version
+    - name: Commit new VERSION
       run: |
         git config --global user.email "victoronwuka7@gmail.com"
         git config --global user.name "Chimuanya vic"
         git add VERSION
-        git commit -m "Bump version to ${{ env.NEW_VERSION }}"
+        git commit -m "Bump version to ${{ env.NEW_VERSION }}" || echo "No changes to commit"
         git push
 
     - name: Set up Docker Buildx
@@ -118,5 +112,5 @@ jobs:
         git config --global user.email "victoronwuka7@gmail.com"
         git config --global user.name "Chimuanya vic"
         git add helm/go-web-app-chart/values.yaml
-        git commit -m "Update Helm chart to ${{ env.NEW_VERSION }}"
+        git commit -m "Update Helm chart to ${{ env.NEW_VERSION }}" || echo "No changes to commit"
         git push
