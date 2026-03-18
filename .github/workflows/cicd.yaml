@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - main
+    tags:
+      - 'v*'
     paths-ignore:
       - 'helm/**'
       - 'k8s/**'
@@ -49,17 +51,18 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Determine automatic version tag
+      - name: Determine automatic Docker image tag
         id: set_tag
         run: |
-          # Get the number of commits on main as patch number
-          PATCH=$(git rev-list --count HEAD)
-          MAJOR=1
-          MINOR=0
-          IMAGE_TAG="v${MAJOR}.${MINOR}.${PATCH}"
+          # Use Git tag if present, otherwise fallback to dev-run_id
+          if [[ -n "${GITHUB_REF_NAME}" ]]; then
+            IMAGE_TAG="${GITHUB_REF_NAME}"
+          else
+            IMAGE_TAG="dev-${GITHUB_RUN_ID}"
+          fi
           echo "IMAGE_TAG=${IMAGE_TAG}" >> $GITHUB_ENV
           echo "IMAGE_TAG=${IMAGE_TAG}" >> $GITHUB_OUTPUT
-          echo "Using Docker tag: ${IMAGE_TAG}"
+          echo "Using Docker image tag: ${IMAGE_TAG}"
 
   push:
     runs-on: ubuntu-latest
@@ -98,7 +101,7 @@ jobs:
         run: |
           sed -i 's/tag: .*/tag: "${IMAGE_TAG}"/' helm/go-web-app-chart/values.yaml
 
-      - name: Commit and push changes
+      - name: Commit and push Helm chart update
         run: |
           git config --global user.email "your-email@example.com"
           git config --global user.name "Your Name"
