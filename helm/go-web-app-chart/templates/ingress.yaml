@@ -6,8 +6,9 @@ metadata:
   annotations:
     nginx.ingress.kubernetes.io/rewrite-target: /
 spec:
+  ingressClassName: nginx
   rules:
-  - host: myapp.local  
+  - host: go-web-app.local
     http:
       paths: 
       - path: /
